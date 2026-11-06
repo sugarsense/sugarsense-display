@@ -210,11 +210,13 @@ static int drawLockup(int x, int base, uint16_t mark, uint16_t sugar, uint16_t s
 static Rect settingsButton() { return {W - 60, 0, 60, 48}; }
 
 // The single view of a followed person wears their name where the wordmark
-// sits (the dots and the clock keep their places).
-static void drawPersonLabel(const View &v, uint16_t ink, int alpha) {
+// sits (the dots and the clock keep their places). `maxW` 0 = the usual room;
+// the Night scene passes the room left of its big clock, in the smaller font.
+static void drawPersonLabel(const View &v, uint16_t ink, int alpha, int maxW = 0, const AAFont *font = nullptr) {
+  const AAFont &f = font ? *font : F_MED;
   char cut[32];
-  fitText(F_MED, v.personLabel, W > H ? 200 : 150, cut, sizeof(cut));
-  gx::text(F_MED, 14, 31, cut, ink, alpha);
+  fitText(f, v.personLabel, maxW > 0 ? maxW : (W > H ? 200 : 150), cut, sizeof(cut));
+  gx::text(f, 14, 31, cut, ink, alpha);
 }
 
 // A newer firmware exists: a small badge at the upper right of the three
@@ -575,8 +577,20 @@ static void drawNight(const View &v) {
   const uint16_t ink = h.fresh ? zoneColor(h.zone) : C_NIGHT_STALE;
   gx::clear(C_BLACK);
 
-  if (!v.st.wifi || !v.st.apiOk) drawLinkWarning(v, C_DIM, 255);
-  else if (v.personLabel) drawPersonLabel(v, C_DIM, 255);
+  if (!v.st.wifi || !v.st.apiOk) {
+    drawLinkWarning(v, C_DIM, 255);
+  } else if (v.personLabel) {
+    // On the wide screen the big clock reaches the top row: the name keeps
+    // to the room on its left, in the smaller font.
+    const int clockTop = L.clockBase - 44;
+    if (v.st.timeSynced && clockTop < 40) {
+      char t[8];
+      clockText(v, t, sizeof(t));
+      drawPersonLabel(v, C_DIM, 255, (W - gx::textW(F_CLOCK, t)) / 2 - 14 - 12, &F_SMALL);
+    } else {
+      drawPersonLabel(v, C_DIM, 255);
+    }
+  }
   drawDots(C_DIM, 150);
   if (v.st.timeSynced) {
     char t[8];
@@ -937,6 +951,13 @@ struct TileSource {
   bool paused;      // the person paused sharing
 };
 
+// The word a tile shows in the number's place ("Not shared", "Paused", "No
+// Data"): the title font when it fits the tile with its margins, else the
+// medium one.
+static const AAFont &tileWordFont(const char *word, int tileW) {
+  return gx::textW(F_TITLE, word) <= tileW - 32 ? F_TITLE : F_MED;
+}
+
 // The number for a tile: the largest size from NUM_S down whose widest value
 // fits the tile's width beside its arrow and whose height leaves room for the
 // name above it and at least one small line under it.
@@ -1026,8 +1047,10 @@ static void drawTile(const View &v, int look, const ss::Tile &r, const TileSourc
     const bool waiting = t.snap->state == ss::STATE_NONE;   // asked for, not answered yet
     const char *big = t.notShared ? "Not shared" : (t.paused ? "Paused" : (waiting ? CH_ELL : "No Data"));
     const char *small = t.notShared ? "Open the app" : (t.paused ? "Sharing paused" : (waiting ? "Connecting" : h.note));
-    gx::textC(F_TITLE, cx, numBase - ns.cap / 2 + 10, big, ink);
-    gx::textC(F_SMALL, cx, lineBase - 4, small, dim, dimAlpha);
+    char cutSmall[40];
+    fitText(F_SMALL, small, r.w - 28, cutSmall, sizeof(cutSmall));
+    gx::textC(tileWordFont(big, r.w), cx, numBase - ns.cap / 2 + 10, big, ink);
+    gx::textC(F_SMALL, cx, lineBase - 4, cutSmall, dim, dimAlpha);
     return;
   }
   drawNumber(cx, numBase, h, ns, ink);

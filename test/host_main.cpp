@@ -223,6 +223,17 @@ static int runLogic() {
     ss::tileLayout(4, 480, 320, 0, t);
     CHECK(t[1].x == 240 && t[2].y == 160 && t[3].x == 240 && t[3].y == 160);
   }
+  // a tile's word always fits its tile, the narrowest one (four upright) included
+  for (int r = 0; r < 2; r++) {
+    gx::setRotation(r);
+    ss::Tile t[SS_MAX_TILES];
+    for (int n = 1; n <= SS_MAX_TILES; n++) {
+      const int count = ss::tileLayout(n, gx::W, gx::H, 48, t);
+      for (int i = 0; i < count; i++)
+        for (const char *word : {"Not shared", "Paused", "No Data", "Connecting"})
+          CHECK(gx::textW(ui::tileWordFont(word, t[i].w), word) <= t[i].w - 28);
+    }
+  }
   // whose glucose the screen shows: a list of ids, at most four, never empty once chosen
   {
     char sel[64] = "";

@@ -16,7 +16,7 @@
 // Files: ss_logic.h (the display rules), gx.h (the renderer), ui.h (every
 // screen), hw.h (the board), store.h (settings), net.h (Wi-Fi + the API).
 
-#define FW_VERSION "0.4.0"
+#define FW_VERSION "0.4.1"
 
 #include "ui.h"
 #include "hw.h"
