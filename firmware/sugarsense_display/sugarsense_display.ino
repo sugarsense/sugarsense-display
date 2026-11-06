@@ -16,7 +16,7 @@
 // Files: ss_logic.h (the display rules), gx.h (the renderer), ui.h (every
 // screen), hw.h (the board), store.h (settings), net.h (Wi-Fi + the API).
 
-#define FW_VERSION "0.4.1"
+#define FW_VERSION "0.4.2"
 
 #include "ui.h"
 #include "hw.h"
@@ -305,13 +305,15 @@ static void net_collect() {
     snap_seq++;
     api_ok = true;
     adopt_offset(snap.hasOffset, snap.offsetMin);
-    // the people the screen shows, from this answer; when the answer did not
-    // carry them yet (the first pull, a change in Settings), ask again now
+    // the people the screen shows, from this answer; the next pull always asks
+    // for exactly these (a person no longer followed leaves the ask too), and
+    // when the answer did not carry them yet (the first pull, a change in
+    // Settings) it asks again now
     const bool pointsBefore = ask_points;
     rebuild_tiles();
     char carried[160] = "";
     for (int i = 0; i < snap.npeople; i++) ss::selectionToggle(carried, sizeof(carried), snap.people[i].id);
-    if (strcmp(carried, ask_people) != 0 || pointsBefore != ask_points) net_ask_for(true);
+    net_ask_for(strcmp(carried, ask_people) != 0 || pointsBefore != ask_points);
   } else if (rc == 401) {   // the session was ended on the account: pair again
     prefs.token[0] = '\0';
     store_save();
