@@ -1,0 +1,446 @@
+{
+  "schema": 1,
+  "title": "The change since the last reading, one rule on every Sugar Sense surface: the partner is the reading about five minutes back whatever the sensor's cadence, a gap of more than 20 minutes shows no change, and a flat pair shows zero. The display runs these cases in tools/host_test.py.",
+  "constants": {
+    "windowSeconds": 270,
+    "maxGapSeconds": 1200,
+    "mgdlToMmol": 0.0555,
+    "minusGlyph": "−",
+    "flatMgdl": "0",
+    "flatMmol": "0.0"
+  },
+  "notes": [
+    "points are oldest first; ageSec is seconds before the NEWEST point (the newest has 0); mgdl is the raw reading.",
+    "partner: among the points strictly older than the newest, the NEWEST one at least windowSeconds older (a Dexcom stream's previous reading, 300 s, qualifies, so nothing changes there), else the OLDEST one within maxGapSeconds (a stream only minutes old: the best span there is); null when the nearest older point is past maxGapSeconds (a sensor swap or a signal gap is not a change) or when nothing older exists (a copy of the newest point is never a partner).",
+    "text: the mg/dL difference newest minus partner, converted to the display unit (times mgdlToMmol for mmol/L), rounded half away from zero (mg/dL to an integer, mmol/L to one decimal), '+' or the minus glyph, a flat pair is flatMgdl / flatMmol, never blank; null without a partner."
+  ],
+  "cases": [
+    {
+      "id": "owner-libre-stream-reads-plus-five",
+      "isMmol": false,
+      "points": [
+        {
+          "ageSec": 1620,
+          "mgdl": 88
+        },
+        {
+          "ageSec": 1440,
+          "mgdl": 88
+        },
+        {
+          "ageSec": 1260,
+          "mgdl": 88
+        },
+        {
+          "ageSec": 1140,
+          "mgdl": 88
+        },
+        {
+          "ageSec": 840,
+          "mgdl": 88
+        },
+        {
+          "ageSec": 600,
+          "mgdl": 88
+        },
+        {
+          "ageSec": 421,
+          "mgdl": 94
+        },
+        {
+          "ageSec": 292,
+          "mgdl": 99
+        },
+        {
+          "ageSec": 62,
+          "mgdl": 104
+        },
+        {
+          "ageSec": 0,
+          "mgdl": 104
+        }
+      ],
+      "expect": {
+        "partnerAgeSec": 292,
+        "text": "+5"
+      }
+    },
+    {
+      "id": "dexcom-previous-reading-stays-the-partner",
+      "isMmol": false,
+      "points": [
+        {
+          "ageSec": 600,
+          "mgdl": 110
+        },
+        {
+          "ageSec": 300,
+          "mgdl": 120
+        },
+        {
+          "ageSec": 0,
+          "mgdl": 116
+        }
+      ],
+      "expect": {
+        "partnerAgeSec": 300,
+        "text": "−4"
+      }
+    },
+    {
+      "id": "minute-cadence-partner-is-the-newest-at-least-the-window-back",
+      "isMmol": false,
+      "points": [
+        {
+          "ageSec": 360,
+          "mgdl": 100
+        },
+        {
+          "ageSec": 300,
+          "mgdl": 102
+        },
+        {
+          "ageSec": 240,
+          "mgdl": 104
+        },
+        {
+          "ageSec": 180,
+          "mgdl": 106
+        },
+        {
+          "ageSec": 120,
+          "mgdl": 108
+        },
+        {
+          "ageSec": 60,
+          "mgdl": 110
+        },
+        {
+          "ageSec": 0,
+          "mgdl": 112
+        }
+      ],
+      "expect": {
+        "partnerAgeSec": 300,
+        "text": "+10"
+      }
+    },
+    {
+      "id": "flat-pair-reads-zero",
+      "isMmol": false,
+      "points": [
+        {
+          "ageSec": 300,
+          "mgdl": 120
+        },
+        {
+          "ageSec": 0,
+          "mgdl": 120
+        }
+      ],
+      "expect": {
+        "partnerAgeSec": 300,
+        "text": "0"
+      }
+    },
+    {
+      "id": "flat-pair-mmol-reads-zero-point-zero",
+      "isMmol": true,
+      "points": [
+        {
+          "ageSec": 300,
+          "mgdl": 108
+        },
+        {
+          "ageSec": 0,
+          "mgdl": 108
+        }
+      ],
+      "expect": {
+        "partnerAgeSec": 300,
+        "text": "0.0"
+      }
+    },
+    {
+      "id": "mmol-one-decimal-half-away-from-zero",
+      "isMmol": true,
+      "points": [
+        {
+          "ageSec": 300,
+          "mgdl": 104
+        },
+        {
+          "ageSec": 0,
+          "mgdl": 115
+        }
+      ],
+      "expect": {
+        "partnerAgeSec": 300,
+        "text": "+0.6"
+      }
+    },
+    {
+      "id": "mmol-one-mgdl-down-reads-minus-point-one",
+      "isMmol": true,
+      "points": [
+        {
+          "ageSec": 300,
+          "mgdl": 104
+        },
+        {
+          "ageSec": 0,
+          "mgdl": 103
+        }
+      ],
+      "expect": {
+        "partnerAgeSec": 300,
+        "text": "−0.1"
+      }
+    },
+    {
+      "id": "gap-past-twenty-minutes-is-no-change",
+      "isMmol": false,
+      "points": [
+        {
+          "ageSec": 2400,
+          "mgdl": 120
+        },
+        {
+          "ageSec": 0,
+          "mgdl": 160
+        }
+      ],
+      "expect": {
+        "partnerAgeSec": null,
+        "text": null
+      }
+    },
+    {
+      "id": "nearest-older-past-the-cap-even-with-older-points",
+      "isMmol": false,
+      "points": [
+        {
+          "ageSec": 3000,
+          "mgdl": 100
+        },
+        {
+          "ageSec": 1500,
+          "mgdl": 110
+        },
+        {
+          "ageSec": 0,
+          "mgdl": 130
+        }
+      ],
+      "expect": {
+        "partnerAgeSec": null,
+        "text": null
+      }
+    },
+    {
+      "id": "exactly-twenty-minutes-counts",
+      "isMmol": false,
+      "points": [
+        {
+          "ageSec": 1200,
+          "mgdl": 120
+        },
+        {
+          "ageSec": 0,
+          "mgdl": 123
+        }
+      ],
+      "expect": {
+        "partnerAgeSec": 1200,
+        "text": "+3"
+      }
+    },
+    {
+      "id": "window-edge-exactly-four-and-a-half-minutes",
+      "isMmol": false,
+      "points": [
+        {
+          "ageSec": 270,
+          "mgdl": 118
+        },
+        {
+          "ageSec": 0,
+          "mgdl": 121
+        }
+      ],
+      "expect": {
+        "partnerAgeSec": 270,
+        "text": "+3"
+      }
+    },
+    {
+      "id": "just-under-the-window-takes-the-older-point",
+      "isMmol": false,
+      "points": [
+        {
+          "ageSec": 600,
+          "mgdl": 110
+        },
+        {
+          "ageSec": 269,
+          "mgdl": 118
+        },
+        {
+          "ageSec": 0,
+          "mgdl": 121
+        }
+      ],
+      "expect": {
+        "partnerAgeSec": 600,
+        "text": "+11"
+      }
+    },
+    {
+      "id": "young-stream-oldest-inside-the-cap",
+      "isMmol": false,
+      "points": [
+        {
+          "ageSec": 180,
+          "mgdl": 112
+        },
+        {
+          "ageSec": 120,
+          "mgdl": 114
+        },
+        {
+          "ageSec": 60,
+          "mgdl": 115
+        },
+        {
+          "ageSec": 0,
+          "mgdl": 117
+        }
+      ],
+      "expect": {
+        "partnerAgeSec": 180,
+        "text": "+5"
+      }
+    },
+    {
+      "id": "copies-of-the-newest-are-no-partner",
+      "isMmol": false,
+      "points": [
+        {
+          "ageSec": 0,
+          "mgdl": 120
+        },
+        {
+          "ageSec": 0,
+          "mgdl": 120
+        }
+      ],
+      "expect": {
+        "partnerAgeSec": null,
+        "text": null
+      }
+    },
+    {
+      "id": "a-copy-of-the-newest-beside-an-older-point",
+      "isMmol": false,
+      "points": [
+        {
+          "ageSec": 300,
+          "mgdl": 117
+        },
+        {
+          "ageSec": 0,
+          "mgdl": 120
+        },
+        {
+          "ageSec": 0,
+          "mgdl": 120
+        }
+      ],
+      "expect": {
+        "partnerAgeSec": 300,
+        "text": "+3"
+      }
+    },
+    {
+      "id": "single-reading",
+      "isMmol": false,
+      "points": [
+        {
+          "ageSec": 0,
+          "mgdl": 118
+        }
+      ],
+      "expect": {
+        "partnerAgeSec": null,
+        "text": null
+      }
+    },
+    {
+      "id": "no-readings",
+      "isMmol": false,
+      "points": [],
+      "expect": {
+        "partnerAgeSec": null,
+        "text": null
+      }
+    },
+    {
+      "id": "half-away-from-zero-up",
+      "isMmol": false,
+      "points": [
+        {
+          "ageSec": 300,
+          "mgdl": 100
+        },
+        {
+          "ageSec": 0,
+          "mgdl": 101.5
+        }
+      ],
+      "expect": {
+        "partnerAgeSec": 300,
+        "text": "+2"
+      }
+    },
+    {
+      "id": "half-away-from-zero-down",
+      "isMmol": false,
+      "points": [
+        {
+          "ageSec": 300,
+          "mgdl": 100
+        },
+        {
+          "ageSec": 0,
+          "mgdl": 98.5
+        }
+      ],
+      "expect": {
+        "partnerAgeSec": 300,
+        "text": "−2"
+      }
+    },
+    {
+      "id": "unsorted-input-is-sorted-first",
+      "isMmol": false,
+      "points": [
+        {
+          "ageSec": 0,
+          "mgdl": 116
+        },
+        {
+          "ageSec": 600,
+          "mgdl": 110
+        },
+        {
+          "ageSec": 300,
+          "mgdl": 120
+        }
+      ],
+      "expect": {
+        "partnerAgeSec": 300,
+        "text": "−4"
+      }
+    }
+  ]
+}
