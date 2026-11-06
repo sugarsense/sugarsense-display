@@ -81,6 +81,33 @@ struct Rect {
 
 // ---- the model ----------------------------------------------------------------
 #define SS_MAX_POINTS 64
+#define SS_MAX_FOLLOWED 8
+
+// One followed person inside a snapshot (Care Circle): the same fields as the
+// account's own reading, under the name the follower gave them. `state` is
+// the server's word for this person: 0 a reading (or a pause), 2 not shared
+// with this account right now.
+struct Person {
+  char id[48] = "";
+  char label[32] = "";
+  int state = ss::STATE_FOLLOWER;
+  bool hasValue = false;
+  double mgdl = 0;
+  int64_t dateMs = 0;
+  int arrow = 3;
+  bool isMmol = false;
+  ss::Band band = ss::DEFAULT_BAND;
+  ss::Point pts[SS_MAX_POINTS];
+  int npts = 0;
+  int hours = 0;
+  bool paused = false;   // the person paused sharing: no number, "Paused"
+};
+
+// Someone this account follows, for the People page.
+struct Followed {
+  char id[48] = "";
+  char label[32] = "";
+};
 
 struct Snapshot {
   int state = ss::STATE_NONE;
@@ -99,6 +126,10 @@ struct Snapshot {
   bool hasOffset = false;         // the server knows this display's time zone
   int offsetMin = 0;              // minutes east of UTC right now, when it does
   int pullS = 60;                 // how often the server wants to be asked
+  Person people[SS_MAX_TILES];    // the followed people the display asked for, in its own order
+  int npeople = 0;
+  Followed followed[SS_MAX_FOLLOWED];   // everyone this account follows (the People page lists them)
+  int nfollowed = 0;
 };
 
 struct Status {
@@ -114,6 +145,7 @@ struct View {
   int tzMin;
   int graphHours;
   bool showGraph = true;   // false = numbers only: no graph, a larger number in the middle
+  const char *personLabel = nullptr;   // the single view of a followed person: their name in place of the wordmark
   // The "one more step" screen (an account with no glucose source yet): the
   // QR code of the page where a phone gets the app, and that page as text.
   const uint8_t *qr = nullptr;
@@ -176,6 +208,14 @@ static int drawLockup(int x, int base, uint16_t mark, uint16_t sugar, uint16_t s
 }
 
 static Rect settingsButton() { return {W - 60, 0, 60, 48}; }
+
+// The single view of a followed person wears their name where the wordmark
+// sits (the dots and the clock keep their places).
+static void drawPersonLabel(const View &v, uint16_t ink, int alpha) {
+  char cut[32];
+  fitText(F_MED, v.personLabel, W > H ? 200 : 150, cut, sizeof(cut));
+  gx::text(F_MED, 14, 31, cut, ink, alpha);
+}
 
 // A newer firmware exists: a small badge at the upper right of the three
 // dots, in the brand green (or the scene's own ink on a colored canvas). The
@@ -240,12 +280,17 @@ struct NumStyle {
   int track;     // pixels between digits (large bold numerals sit a little tighter)
 };
 
-enum { NUM_XL = 0, NUM_L, NUM_X, NUM_M, NUM_S, NUM_COUNT };
+// The five scene sizes, then three smaller ones for the tiles of the split
+// screen (several people at once).
+enum { NUM_XL = 0, NUM_L, NUM_X, NUM_M, NUM_S, NUM_T1, NUM_T2, NUM_T3, NUM_COUNT };
 static const NumStyle NUM_STYLES[NUM_COUNT] = {{&F_NUM_XL, &F_ARROW_L, 134, 78, -4},
                                                {&F_NUM_L, &F_ARROW_L, 109, 78, -3},
                                                {&F_NUM_X, &F_ARROW_M, 96, 60, -3},
                                                {&F_NUM_M, &F_ARROW_M, 84, 60, -2},
-                                               {&F_NUM_S, &F_ARROW_S, 73, 52, -2}};
+                                               {&F_NUM_S, &F_ARROW_S, 73, 52, -2},
+                                               {&F_NUM_T1, &F_ARROW_XS, 64, 34, -2},
+                                               {&F_NUM_T2, &F_ARROW_XS, 50, 34, -1},
+                                               {&F_NUM_T3, &F_ARROW_XXS, 39, 26, -1}};
 
 // The largest size, from `first` down, whose widest value fits `room` beside
 // an arrow (`arrowPx` 0 = the size's own arrow).
@@ -255,7 +300,7 @@ static NumStyle fitNum(bool mmol, int first, int room, int arrowPx) {
     const NumStyle &n = NUM_STYLES[i];
     if (gx::textW(*n.num, widest, n.track) + 10 + (arrowPx ? arrowPx : n.arrowPx) <= room) return n;
   }
-  return NUM_STYLES[NUM_S];
+  return NUM_STYLES[NUM_COUNT - 1];
 }
 
 // The Color and Night scenes: with a graph the wide screen takes the 150 px
@@ -501,6 +546,7 @@ static void drawDay(const View &v) {
   gx::clear(h.fresh ? zoneColor(h.zone) : C_SLATE);
 
   if (!v.st.wifi || !v.st.apiOk) drawLinkWarning(v, ink, 255);
+  else if (v.personLabel) drawPersonLabel(v, ink, 236);
   else drawLockup(14, 31, ink, ink, ink, 236);
   drawDots(ink, 190);
   if (v.st.timeSynced) {
@@ -530,6 +576,7 @@ static void drawNight(const View &v) {
   gx::clear(C_BLACK);
 
   if (!v.st.wifi || !v.st.apiOk) drawLinkWarning(v, C_DIM, 255);
+  else if (v.personLabel) drawPersonLabel(v, C_DIM, 255);
   drawDots(C_DIM, 150);
   if (v.st.timeSynced) {
     char t[8];
@@ -745,6 +792,7 @@ static void drawDark(const View &v) {
   gx::clear(C_BG);
 
   if (!v.st.wifi || !v.st.apiOk) drawLinkWarning(v, C_TEXT, 255);
+  else if (v.personLabel) drawPersonLabel(v, C_TEXT, 230);
   else drawLockup(14, 31, C_BRAND, C_LOGO_SUGAR, C_BRAND);
   drawDots(C_DIM, 255);
   if (v.st.timeSynced) {
@@ -875,6 +923,140 @@ static void drawHome(const View &v, int look) {
   if (look == LOOK_NIGHT) drawNight(v);
   else if (look == LOOK_COLOR) drawDay(v);
   else drawDark(v);
+}
+
+// ---- several people: the split screen -------------------------------------------
+// One tile of the split screen: a snapshot (the account's own, or a Person
+// copied into one), its name, and the two states a followed person can be in
+// besides a reading.
+struct TileSource {
+  const Snapshot *snap;
+  const char *label;
+  bool self;        // the account's own glucose
+  bool notShared;   // the server answered state 2 for this person
+  bool paused;      // the person paused sharing
+};
+
+// The number for a tile: the largest size from NUM_S down whose widest value
+// fits the tile's width beside its arrow and whose height leaves room for the
+// name above it and at least one small line under it.
+static const int TILE_NAME_H = 30, TILE_GAP = 12;   // the name's room above the number, the gap under it
+
+static NumStyle tileNum(bool mmol, int w, int h) {
+  const char *widest = mmol ? "88.8" : "888";
+  for (int i = NUM_S; i < NUM_COUNT; i++) {
+    const NumStyle &n = NUM_STYLES[i];
+    if (gx::textW(*n.num, widest, n.track) + 10 + n.arrowPx <= w - 24 && n.cap <= h - (TILE_NAME_H + TILE_GAP + 20)) return n;
+  }
+  return NUM_STYLES[NUM_COUNT - 1];
+}
+
+// The split screen's header: the Night scene's clock in its strip, else the
+// app's brand bar on a dark strip above the tiles (the Color scene's tiles
+// carry the color, the strip stays dark so the first row is as tall as the
+// second).
+static const int SPLIT_TOP = 48, SPLIT_TOP_NIGHT = 78;
+
+static void drawSplitHeader(const View &v, int look) {
+  char t[8];
+  if (look == LOOK_NIGHT) {
+    if (!v.st.wifi || !v.st.apiOk) drawLinkWarning(v, C_DIM, 255);
+    drawDots(C_DIM, 150);
+    if (v.st.timeSynced) {
+      clockText(v, t, sizeof(t));
+      gx::textC(F_CLOCK, W / 2, 62, t, C_TEXT, 150);
+    }
+    return;
+  }
+  if (!v.st.wifi || !v.st.apiOk) drawLinkWarning(v, C_TEXT, 255);
+  else drawLockup(14, 31, C_BRAND, C_LOGO_SUGAR, C_BRAND);
+  drawDots(C_DIM, 255);
+  if (v.st.timeSynced) {
+    clockText(v, t, sizeof(t));
+    gx::textR(F_MED, W - 56, 31, t, C_TEXT, 210);
+  }
+}
+
+// One tile: the name, the number with its arrow, the change and the age. On
+// a narrow tile the change and the age take two lines.
+static void drawTile(const View &v, int look, const ss::Tile &r, const TileSource &t, int contentTop) {
+  View tv = v;
+  tv.snap = t.snap;
+  Headline h = headline(tv);
+  const bool color = look == LOOK_COLOR, night = look == LOOK_NIGHT;
+  const bool live = h.fresh && !t.paused && !t.notShared;
+  uint16_t ink, name, dim;
+  int nameAlpha = 255, dimAlpha = 255;
+  if (color) {
+    gx::rect(r.x, r.y, r.w, r.h, live ? zoneColor(h.zone) : C_SLATE);
+    if (r.x > 0) gx::rect(r.x, r.y, 1, r.h, C_BLACK, 70);   // a hairline between tiles
+    if (r.y > SPLIT_TOP) gx::rect(r.x, r.y, r.w, 1, C_BLACK, 70);
+    ink = name = dim = C_WHITE;
+    nameAlpha = 220;
+    dimAlpha = 190;
+  } else if (night) {
+    if (r.x > 0) gx::rect(r.x, r.y + 10, 1, r.h - 20, C_LINE, 120);
+    if (r.y > SPLIT_TOP_NIGHT) gx::rect(r.x + 10, r.y, r.w - 20, 1, C_LINE, 120);
+    ink = live ? zoneColor(h.zone) : C_NIGHT_STALE;
+    name = dim = C_DIM;
+  } else {
+    gx::rrect(r.x + 6, r.y + 6, r.w - 12, r.h - 12, 18, C_CARD);
+    ink = live ? zoneColor(h.zone) : C_SLATE;
+    name = C_TEXT;
+    nameAlpha = 210;
+    dim = C_DIM;
+  }
+  const int room = (r.y + r.h) - contentTop;
+  NumStyle ns = tileNum(t.snap->isMmol, r.w, room);
+  // Under the number: a wide tile carries the app's change line (the change
+  // bold, the unit, the age); a narrower one takes two lines when the height
+  // allows, else one small line with everything on it.
+  const int mode = r.w >= 300 ? 0 : (room >= TILE_NAME_H + ns.cap + TILE_GAP + 44 ? 1 : 2);
+  const int linesH = mode == 0 ? 26 : (mode == 1 ? 44 : 18);
+  const int block = TILE_NAME_H + ns.cap + TILE_GAP + linesH;
+  int y = contentTop + (room - block) / 2;
+  if (y < contentTop) y = contentTop;
+  const int cx = r.x + r.w / 2;
+  char cut[32];
+  fitText(F_MED, t.label, r.w - 24, cut, sizeof(cut));
+  gx::textC(F_MED, cx, y + 16, cut, name, nameAlpha);
+  const int numBase = y + TILE_NAME_H + ns.cap, lineBase = numBase + TILE_GAP + (mode == 2 ? 14 : 22);
+  const uint16_t lineInk = color ? C_WHITE : (night ? ink : C_TEXT);
+  if (t.notShared || t.paused || !h.fresh) {
+    const bool waiting = t.snap->state == ss::STATE_NONE;   // asked for, not answered yet
+    const char *big = t.notShared ? "Not shared" : (t.paused ? "Paused" : (waiting ? CH_ELL : "No Data"));
+    const char *small = t.notShared ? "Open the app" : (t.paused ? "Sharing paused" : (waiting ? "Connecting" : h.note));
+    gx::textC(F_TITLE, cx, numBase - ns.cap / 2 + 10, big, ink);
+    gx::textC(F_SMALL, cx, lineBase - 4, small, dim, dimAlpha);
+    return;
+  }
+  drawNumber(cx, numBase, h, ns, ink);
+  if (mode == 0) {
+    drawChangeLine(cx, lineBase, h, true, lineInk, color ? 190 : (night ? 170 : 150));
+    return;
+  }
+  char first[24];
+  if (h.delta[0]) snprintf(first, sizeof(first), "%s %s", h.delta, h.unit);
+  else snprintf(first, sizeof(first), "%s", h.unit);
+  if (mode == 1) {
+    gx::textC(F_MED, cx, lineBase - 2, first, lineInk, color ? 220 : (night ? 190 : 200));
+    gx::textC(F_SMALL, cx, lineBase + 18, h.note, dim, dimAlpha);
+    return;
+  }
+  char one[48];
+  snprintf(one, sizeof(one), "%s  " CH_DOT "  %s", first, h.note);
+  gx::textC(F_SMALL, cx, lineBase, one, lineInk, color ? 210 : (night ? 180 : 190));
+}
+
+// Several people at once: the screen split into tiles (ss::tileLayout), each
+// in the scene's own look, the header over them or above them.
+static void drawSplit(const View &v, int look, const TileSource *t, int n) {
+  gx::clear(look == LOOK_NIGHT ? C_BLACK : C_BG);
+  const int top = look == LOOK_NIGHT ? SPLIT_TOP_NIGHT : SPLIT_TOP;
+  ss::Tile tiles[SS_MAX_TILES];
+  const int count = ss::tileLayout(n, W, H, top, tiles);
+  for (int i = 0; i < count; i++) drawTile(v, look, tiles[i], t[i], tiles[i].y + 10);
+  drawSplitHeader(v, look);
 }
 
 static void drawHeader(const char *title, const char *sub) {

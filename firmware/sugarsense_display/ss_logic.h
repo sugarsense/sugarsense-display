@@ -163,6 +163,89 @@ static inline int lookForScene(int scene, bool nightHours) {
   return nightHours ? 1 : 2;
 }
 
+// ---- several people on one screen -------------------------------------------
+// A follower's display may show up to four people at once (the account's own
+// glucose and the people it follows in the Care Circle). The screen splits
+// into tiles under a header of `top` pixels: two people share the width on
+// the wide screen and stack upright; three and four make two rows, and an
+// odd last tile spans its row.
+#define SS_MAX_TILES 4
+
+struct Tile { int x, y, w, h; };
+
+static inline int tileLayout(int n, int W, int H, int top, Tile *out) {
+  if (n < 1) return 0;
+  if (n > SS_MAX_TILES) n = SS_MAX_TILES;
+  const bool wide = W > H;
+  const int cols = n == 1 ? 1 : ((wide || n == 4) ? 2 : 1);
+  const int rows = (n + cols - 1) / cols;
+  const int h = (H - top) / rows;
+  for (int i = 0; i < n; i++) {
+    const int r = i / cols, c = i % cols;
+    const bool spans = (i == n - 1) && (n % cols != 0);
+    out[i] = {spans ? 0 : c * (W / cols), top + r * h, spans ? W : W / cols, h};
+  }
+  return n;
+}
+
+// The people a display shows, kept as one comma-separated string of ids
+// ("me" for the account's own glucose, else the followed person's id). An
+// empty string means "nothing chosen yet": the caller applies its default.
+static inline bool selectionHas(const char *sel, const char *id) {
+  if (!sel || !id || !id[0]) return false;
+  const size_t n = strlen(id);
+  const char *p = sel;
+  while (*p) {
+    const char *e = strchr(p, ',');
+    const size_t len = e ? (size_t)(e - p) : strlen(p);
+    if (len == n && strncmp(p, id, n) == 0) return true;
+    if (!e) break;
+    p = e + 1;
+  }
+  return false;
+}
+
+static inline int selectionCount(const char *sel) {
+  if (!sel || !sel[0]) return 0;
+  int n = 1;
+  for (const char *p = sel; *p; p++) if (*p == ',') n++;
+  return n;
+}
+
+// Adds an id that is absent, removes one that is present. Returns false when
+// nothing changed: the last chosen person cannot be removed, a fifth cannot
+// be added, and the string cannot grow past its room.
+static inline bool selectionToggle(char *sel, size_t room, const char *id) {
+  if (!sel || !id || !id[0] || strchr(id, ',')) return false;
+  if (selectionHas(sel, id)) {
+    if (selectionCount(sel) <= 1) return false;
+    char out[256];
+    size_t o = 0;
+    const char *p = sel;
+    while (*p) {
+      const char *e = strchr(p, ',');
+      const size_t len = e ? (size_t)(e - p) : strlen(p);
+      if (!(len == strlen(id) && strncmp(p, id, len) == 0)) {
+        if (o + len + 2 >= sizeof(out)) return false;
+        if (o) out[o++] = ',';
+        memcpy(out + o, p, len);
+        o += len;
+      }
+      if (!e) break;
+      p = e + 1;
+    }
+    out[o] = '\0';
+    snprintf(sel, room, "%s", out);
+    return true;
+  }
+  if (selectionCount(sel) >= SS_MAX_TILES) return false;
+  const size_t need = strlen(sel) + (sel[0] ? 1 : 0) + strlen(id) + 1;
+  if (need > room) return false;
+  if (sel[0]) strcat(sel, ",");
+  strcat(sel, id);
+  return true;
+}
+
 // The moment in an HTTP Date header ("Thu, 05 Nov 2026 07:22:46 GMT") as
 // seconds since 1970, UTC. The display sets its clock from the Date of our
 // own server's answers, so it keeps time on a network that blocks NTP.

@@ -5,7 +5,7 @@
     python3 tools/make_screens.py out/ docs/screens.png
 
 Nine screens exactly as the firmware draws them (the host renders), on the
-page's dark background. Needs Pillow.
+page's dark background, two of them the split screen of several people. Needs Pillow.
 """
 import os
 import sys
@@ -15,8 +15,8 @@ from PIL import Image, ImageDraw
 # The Color scene leads: it is what a display shows by day out of the box.
 TILES = [
     "L_21_color_inrange", "L_22_color_high_mmol", "L_09_night_inrange",
-    "L_01_dark_inrange", "L_24_dark_wide_swing", "L_03_dark_verylow_24h",
-    "L_35_nograph_color", "L_10_night_high_mmol", "L_16_pairing",
+    "L_01_dark_inrange", "L_24_dark_wide_swing", "L_41_split2_color",
+    "L_35_nograph_color", "L_47_split4_dark", "L_16_pairing",
 ]
 COLS, W, H, GAP, RADIUS = 3, 480, 320, 24, 16
 BG, EDGE = (10, 14, 17), (35, 44, 54)

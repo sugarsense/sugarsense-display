@@ -26,6 +26,7 @@ struct Prefs {
   uint8_t sound;         // interface sounds through the speaker, when one is attached
   int16_t tzMin;         // minutes east of UTC
   uint8_t tzAuto;        // 1 = the offset follows the phone that paired the display (the server sends it)
+  char people[160];      // whose glucose the screen shows: "me" and / or followed ids, comma-separated ("" = the default)
 };
 
 static Prefs prefs;
@@ -47,6 +48,7 @@ static void store_load() {
   prefs.sound = store_nvs.getUChar("sound", 1);
   prefs.tzMin = store_nvs.getShort("tz", 0);
   prefs.tzAuto = store_nvs.getUChar("tzauto", 1);
+  store_nvs.getString("people", prefs.people, sizeof(prefs.people));
   if (prefs.scene > SCENE_COLOR) prefs.scene = SCENE_AUTO;
   if (prefs.graphHours != 0 && prefs.graphHours != 3 && prefs.graphHours != 6 && prefs.graphHours != 12 && prefs.graphHours != 24) prefs.graphHours = 3;
 }
@@ -65,6 +67,7 @@ static void store_save() {
   store_nvs.putUChar("sound", prefs.sound);
   store_nvs.putShort("tz", prefs.tzMin);
   store_nvs.putUChar("tzauto", prefs.tzAuto);
+  store_nvs.putString("people", prefs.people);
 }
 
 #endif

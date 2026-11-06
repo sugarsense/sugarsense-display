@@ -207,6 +207,38 @@ static int runLogic() {
       }
     }
   }
+  // the tiles of the split screen: two share the width on the wide screen and
+  // stack upright, three and four make two rows, an odd last tile spans its row
+  {
+    ss::Tile t[SS_MAX_TILES];
+    CHECK(ss::tileLayout(0, 480, 320, 48, t) == 0 && ss::tileLayout(7, 480, 320, 48, t) == 4);
+    CHECK(ss::tileLayout(2, 480, 320, 48, t) == 2 && t[0].x == 0 && t[0].w == 240 && t[1].x == 240 && t[0].y == 48 && t[0].h == 272);
+    CHECK(ss::tileLayout(2, 320, 480, 48, t) == 2 && t[0].w == 320 && t[1].y == 48 + 216 && t[1].h == 216);
+    ss::tileLayout(3, 480, 320, 48, t);
+    CHECK(t[0].w == 240 && t[1].x == 240 && t[2].x == 0 && t[2].w == 480 && t[2].y == 48 + 136);
+    ss::tileLayout(3, 320, 480, 0, t);
+    CHECK(t[0].w == 320 && t[2].y == 320 && t[2].h == 160);
+    ss::tileLayout(4, 320, 480, 78, t);
+    CHECK(t[3].x == 160 && t[3].y == 78 + 201 && t[3].w == 160);
+    ss::tileLayout(4, 480, 320, 0, t);
+    CHECK(t[1].x == 240 && t[2].y == 160 && t[3].x == 240 && t[3].y == 160);
+  }
+  // whose glucose the screen shows: a list of ids, at most four, never empty once chosen
+  {
+    char sel[64] = "";
+    CHECK(ss::selectionCount(sel) == 0 && !ss::selectionHas(sel, "me"));
+    CHECK(ss::selectionToggle(sel, sizeof(sel), "me") && std::string(sel) == "me");
+    CHECK(!ss::selectionToggle(sel, sizeof(sel), "me") && std::string(sel) == "me");   // the last one stays
+    CHECK(ss::selectionToggle(sel, sizeof(sel), "anna") && std::string(sel) == "me,anna" && ss::selectionCount(sel) == 2);
+    CHECK(ss::selectionHas(sel, "anna") && !ss::selectionHas(sel, "ann") && !ss::selectionHas(sel, "anna2"));
+    CHECK(ss::selectionToggle(sel, sizeof(sel), "me") && std::string(sel) == "anna");
+    CHECK(ss::selectionToggle(sel, sizeof(sel), "b") && ss::selectionToggle(sel, sizeof(sel), "c") && ss::selectionToggle(sel, sizeof(sel), "d"));
+    CHECK(!ss::selectionToggle(sel, sizeof(sel), "e") && ss::selectionCount(sel) == 4);   // never a fifth
+    CHECK(ss::selectionToggle(sel, sizeof(sel), "c") && std::string(sel) == "anna,b,d");
+    char tiny[6] = "me";
+    CHECK(!ss::selectionToggle(tiny, sizeof(tiny), "anna") && std::string(tiny) == "me");   // no room
+    CHECK(!ss::selectionToggle(sel, sizeof(sel), "x,y"));
+  }
   printf(failures ? "logic: %d FAILED\n" : "logic: ok\n", failures);
   return failures ? 1 : 0;
 }
@@ -409,6 +441,39 @@ static int runRender(const std::string &dir) {
     SHOT("29_color_update_dot", ui::drawHome(v, ui::LOOK_COLOR));
     ui::updateHint = false;
     SHOT("20_confirm", ui::drawConfirm("Disconnect", "This display will stop", "showing your glucose", "until you pair it again.", "Cancel", "Disconnect"));
+
+    // several people: the split screen in the three scenes, and one followed
+    // person alone (their name in place of the wordmark)
+    {
+      static ui::Snapshot me, anna, tom, sam;
+      series(me, 3, 2, 104, 26, false);
+      series(anna, 3, 1, 62, 18, false);
+      anna.arrow = 2;
+      series(tom, 3, 4, 205, 48, true);
+      tom.arrow = 5;
+      series(sam, 3, 40, 150, 20, false);   // stale
+      ui::TileSource two[2] = {{&me, "Me", true, false, false}, {&anna, "Anna", false, false, false}};
+      ui::TileSource three[3] = {{&me, "Me", true, false, false}, {&anna, "Anna", false, false, false}, {&tom, "Tom", false, false, false}};
+      ui::TileSource four[4] = {{&me, "Me", true, false, false}, {&anna, "Anna (daughter)", false, false, false}, {&tom, "Tom", false, false, false}, {&sam, "Sam", false, false, false}};
+      ui::TileSource states[4] = {{&anna, "Anna", false, false, false}, {&tom, "Tom", false, false, true}, {&sam, "Grandpa Joe", false, true, false}, {&sam, "Sam", false, false, false}};
+      SHOT("41_split2_color", ui::drawSplit(v, ui::LOOK_COLOR, two, 2));
+      SHOT("42_split2_dark", ui::drawSplit(v, ui::LOOK_DARK, two, 2));
+      SHOT("43_split2_night", ui::drawSplit(v, ui::LOOK_NIGHT, two, 2));
+      SHOT("44_split3_color", ui::drawSplit(v, ui::LOOK_COLOR, three, 3));
+      SHOT("45_split3_dark", ui::drawSplit(v, ui::LOOK_DARK, three, 3));
+      SHOT("46_split4_color", ui::drawSplit(v, ui::LOOK_COLOR, four, 4));
+      SHOT("47_split4_dark", ui::drawSplit(v, ui::LOOK_DARK, four, 4));
+      SHOT("48_split4_night", ui::drawSplit(v, ui::LOOK_NIGHT, four, 4));
+      SHOT("49_split4_states", ui::drawSplit(v, ui::LOOK_DARK, states, 4));
+      ui::View one = v;
+      one.snap = &anna;
+      one.personLabel = "Anna (daughter)";
+      SHOT("50_follow_dark", ui::drawHome(one, ui::LOOK_DARK));
+      SHOT("51_follow_color", ui::drawHome(one, ui::LOOK_COLOR));
+      SHOT("52_follow_night", ui::drawHome(one, ui::LOOK_NIGHT));
+      ui::Row people[5] = {{"Me", "On", ui::ROW_CYCLE}, {"Anna (daughter)", "On", ui::ROW_CYCLE}, {"Tom", "Off", ui::ROW_CYCLE}, {"Grandpa Joe", "Off", ui::ROW_CYCLE}, {"Sam", "On", ui::ROW_CYCLE}};
+      SHOT("53_settings_people", ui::drawMenu("People", nullptr, people, 5, "Done", "Display"));
+    }
   }
   return 0;
 }

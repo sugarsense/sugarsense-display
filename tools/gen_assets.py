@@ -40,6 +40,10 @@ FONTS = [
     ("F_NUM_X", "inter_bold.ttf", 132, DIGITS + ".", False),
     ("F_NUM_L", "inter_bold.ttf", 150, DIGITS + ".", False),
     ("F_NUM_XL", "inter_bold.ttf", 184, DIGITS + ".", False),
+    # Three smaller sizes for the tiles of the split screen (several people at once).
+    ("F_NUM_T1", "inter_bold.ttf", 88, DIGITS + ".", False),
+    ("F_NUM_T2", "inter_bold.ttf", 68, DIGITS + ".", False),
+    ("F_NUM_T3", "inter_bold.ttf", 54, DIGITS + ".", False),
     ("F_CLOCK", "inter_semibold.ttf", 58, DIGITS + ":", True),
     ("F_HEAD", "inter_bold.ttf", 62, "No Data", False),
     ("F_CODE", "inter_bold.ttf", 46, DIGITS + "ABCDEFGHJKMNPQRSTVWXYZ", False),
@@ -50,7 +54,7 @@ FONTS = [
 ]
 
 # One arrow set per number size, about half the number's height.
-ARROWS = [("F_ARROW_XS", 34), ("F_ARROW_S", 52), ("F_ARROW_M", 60), ("F_ARROW_L", 78)]
+ARROWS = [("F_ARROW_XXS", 26), ("F_ARROW_XS", 34), ("F_ARROW_S", 52), ("F_ARROW_M", 60), ("F_ARROW_L", 78)]
 MARK_PX = 26           # the drop mark beside the wordmark
 ICON_PX = 88           # the app icon on the splash and pairing screens
 PAGE_BG = (0x0A, 0x0E, 0x11)   # C_BG in the firmware; the icon is pre-blended on it

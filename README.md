@@ -8,7 +8,8 @@ its zone color, the trend arrow, the change, the age of the reading, and the
 graph (a smooth line colored by zone over the target range). At night it turns
 into a black bedside clock with the number under it. If you like it loud, one
 setting paints the whole screen in the zone color; if you like it quiet,
-another hides the graph and leaves the number alone.
+another hides the graph and leaves the number alone. If you follow people in
+the app's Care Circle, the screen can show them too, up to four at once.
 
 ![The screens](docs/screens.png)
 
@@ -80,6 +81,14 @@ time servers `pool.ntp.org` and `time.google.com` for the clock; nothing else.
 - **Graph: Off** is for numbers only: the graph goes, the number grows and
   stands in the middle of the screen with the change and the age under it. It
   works in every scene.
+- **People** (a fourth page, there when the account follows someone in the
+  Care Circle): your own glucose and every person you follow, each On or Off.
+  One person fills the screen as usual, with their name in the corner; two to
+  four split it into tiles, each with the name, the number in its zone color,
+  the arrow, the change and the age, in whichever scene is up. At least one
+  stays on; a person who stops sharing shows "Not shared", a pause shows
+  "Paused". The display only ever shows people who already share with that
+  account in the app; nothing here grants anything.
 - Past 15 minutes without a reading the screen says "No Data". It never keeps
   showing an old number as if it were current.
 - **A small dot beside the three dots** means a newer version is out. Settings
@@ -164,11 +173,12 @@ The display is a read-only client of `https://app.sugarsense.io/api/v1`:
 |---|---|
 | `POST /displayPairStart` | no session yet: answers a 6-character code, a poll secret and the address of the pairing page |
 | `POST /displayPairPoll` | the poll secret: pending until you tap Connect, then ONE session token |
-| `POST /getDisplaySnapshot` | the session token: the latest reading, your limits and unit, the graph's points, the clock offset, the newest firmware version |
+| `POST /getDisplaySnapshot` | the session token: the latest reading, your limits and unit, the graph's points, the clock offset, the newest firmware version; with `people` (the followed ids the screen shows) also each of their readings, and always `followed`, everyone the account follows |
 | `POST /displayUnpair` | the session token: ends the session ("Disconnect") |
 
 A session token reads the glucose snapshot of the one account that confirmed
-the code, and nothing else.
+the code, and of the people that account follows in the Care Circle, through
+the same permission check the phone app uses. Nothing else.
 
 ### The display rules
 
@@ -185,8 +195,6 @@ Every Sugar Sense surface follows the same rules, and so does this one:
 
 - No alarms and no sounds for lows or highs. Your phone alerts you; this is a
   display.
-- No following of another person's glucose yet: it shows the paired account's
-  own readings.
 - No text beyond English yet: the fonts carry Latin letters only.
 - No updates over Wi-Fi yet: the display tells you when a new version is out,
   and you install it from app.sugarsense.io/install, over USB.

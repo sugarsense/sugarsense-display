@@ -5,6 +5,8 @@
 // account's glucose once a minute and shows it in the Sugar Sense app's own
 // look: a dark screen with the number in its zone color and the app's graph,
 // a black bedside clock at night, or the whole screen in the zone color.
+// An account that follows people in the Care Circle can show them too, up
+// to four at once on a split screen (Settings > People).
 //
 // NOT A MEDICAL DEVICE. It is a second screen for readings you already have
 // in the app. It never alerts, and past 15 minutes without a reading it says
@@ -14,7 +16,7 @@
 // Files: ss_logic.h (the display rules), gx.h (the renderer), ui.h (every
 // screen), hw.h (the board), store.h (settings), net.h (Wi-Fi + the API).
 
-#define FW_VERSION "0.3.3"
+#define FW_VERSION "0.4.0"
 
 #include "ui.h"
 #include "hw.h"
@@ -69,6 +71,88 @@ static ui::View make_view() {
   return v;
 }
 
+// ---- whose glucose the screen shows --------------------------------------------
+// The account's own reading ("me") and the followed people the person chose
+// in Settings > People (prefs.people). Nothing chosen = the own reading when
+// the account has a source, else the first followed person. A chosen person
+// who is no longer followed drops out by himself.
+static const char *ME = "me";
+static ui::Snapshot person_snaps[SS_MAX_TILES];   // a followed person's reading as a Snapshot, for the drawers
+static ui::TileSource tiles[SS_MAX_TILES];
+static int ntiles = 0;
+static char ask_people[160] = "";   // the followed ids the next pull asks for
+static bool ask_points = false;
+
+static bool own_has_source() { return snap.state == ss::STATE_OK; }
+
+static int followed_index(const char *id) {
+  for (int i = 0; i < snap.nfollowed; i++)
+    if (strcmp(snap.followed[i].id, id) == 0) return i;
+  return -1;
+}
+
+static const ui::Person *person_for(const char *id) {
+  for (int i = 0; i < snap.npeople; i++)
+    if (strcmp(snap.people[i].id, id) == 0) return &snap.people[i];
+  return nullptr;
+}
+
+// The ids the screen shows, in order: "me" first when chosen, then the
+// followed people in the order they are followed. Returns the count; `ids`
+// point into prefs / snap.
+static int chosen_ids(const char **ids) {
+  int n = 0;
+  const bool chosen = prefs.people[0] != '\0';
+  if (own_has_source() && (!chosen || ss::selectionHas(prefs.people, ME))) ids[n++] = ME;
+  for (int i = 0; i < snap.nfollowed && n < SS_MAX_TILES; i++) {
+    if (chosen ? ss::selectionHas(prefs.people, snap.followed[i].id) : (n == 0 && i == 0)) ids[n++] = snap.followed[i].id;
+  }
+  if (n == 0 && own_has_source()) ids[n++] = ME;
+  if (n == 0 && snap.nfollowed > 0) ids[n++] = snap.followed[0].id;
+  return n;
+}
+
+// Rebuild the tiles from the newest snapshot, and remember what the next pull
+// must ask for (the followed ids among the chosen, the whole window when one
+// followed person stands alone).
+static void rebuild_tiles() {
+  const char *ids[SS_MAX_TILES];
+  const int n = chosen_ids(ids);
+  ntiles = 0;
+  ask_people[0] = '\0';
+  int followedCount = 0;
+  for (int i = 0; i < n; i++) {
+    ui::TileSource &t = tiles[ntiles];
+    if (strcmp(ids[i], ME) == 0) {
+      t = {&snap, "Me", true, false, false};
+      ntiles++;
+      continue;
+    }
+    ss::selectionToggle(ask_people, sizeof(ask_people), ids[i]);   // bounded: never past the room, never a fifth
+    followedCount++;
+    const int fi = followed_index(ids[i]);
+    const ui::Person *p = person_for(ids[i]);
+    ui::Snapshot &ps = person_snaps[ntiles];
+    ps = ui::Snapshot();
+    if (p) {
+      ps.state = p->state == ss::STATE_OK ? ss::STATE_OK : ss::STATE_FOLLOWER;
+      ps.hasValue = p->hasValue;
+      ps.mgdl = p->mgdl;
+      ps.dateMs = p->dateMs;
+      ps.arrow = p->arrow;
+      ps.isMmol = p->isMmol;
+      ps.band = p->band;
+      memcpy(ps.pts, p->pts, sizeof(ps.pts));
+      ps.npts = p->npts;
+      ps.hours = p->hours;
+    }
+    // not answered yet (ps stays at STATE_NONE): the tile says "Connecting" until the re-ask lands
+    t = {&ps, fi >= 0 ? snap.followed[fi].label : (p ? p->label : "Person"), false, p ? p->state != ss::STATE_OK : false, p ? p->paused : false};
+    ntiles++;
+  }
+  ask_points = (n == 1 && followedCount == 1);
+}
+
 // The server names the firmware the install page serves; a newer one than
 // this build is an update the person can install.
 static bool update_available() { return snap.latest[0] && ss::compareVersions(snap.latest, FW_VERSION) > 0; }
@@ -121,6 +205,8 @@ static volatile bool net_kick = false;   // pull now, not at the next minute
 static struct {
   char token[48];
   int hours;
+  char people[160];   // the followed ids the screen shows
+  bool points;        // the whole window for the one followed person shown alone
 } net_ask;
 static struct {
   ui::Snapshot snap;
@@ -139,15 +225,19 @@ static void net_task(void *) {
     if (!net_kick && gap && millis() - last_done < gap) continue;
     char token[48];
     int hours;
+    static char people[160];
+    bool points;
     xSemaphoreTake(net_lock, portMAX_DELAY);
     memcpy(token, net_ask.token, sizeof(token));
     hours = net_ask.hours;
+    memcpy(people, net_ask.people, sizeof(people));
+    points = net_ask.points;
     xSemaphoreGive(net_lock);
     if (!token[0]) continue;
     net_kick = false;
     net_busy = true;
     const uint32_t started = millis();
-    const int rc = api_snapshot(token, hours, fresh);
+    const int rc = api_snapshot(token, hours, people, points, fresh);
     const uint32_t took = millis() - started;
     trace(TR_PULL, (int)took, rc);
     xSemaphoreTake(net_lock, portMAX_DELAY);
@@ -168,6 +258,8 @@ static void net_ask_for(bool now) {
   xSemaphoreTake(net_lock, portMAX_DELAY);
   snprintf(net_ask.token, sizeof(net_ask.token), "%s", prefs.token);
   net_ask.hours = prefs.graphHours ? prefs.graphHours : 3;   // without a graph the short window still carries the change
+  snprintf(net_ask.people, sizeof(net_ask.people), "%s", ask_people);
+  net_ask.points = ask_points;
   xSemaphoreGive(net_lock);
   if (!now) return;
   net_kick = true;
@@ -213,6 +305,13 @@ static void net_collect() {
     snap_seq++;
     api_ok = true;
     adopt_offset(snap.hasOffset, snap.offsetMin);
+    // the people the screen shows, from this answer; when the answer did not
+    // carry them yet (the first pull, a change in Settings), ask again now
+    const bool pointsBefore = ask_points;
+    rebuild_tiles();
+    char carried[160] = "";
+    for (int i = 0; i < snap.npeople; i++) ss::selectionToggle(carried, sizeof(carried), snap.people[i].id);
+    if (strcmp(carried, ask_people) != 0 || pointsBefore != ask_points) net_ask_for(true);
   } else if (rc == 401) {   // the session was ended on the account: pair again
     prefs.token[0] = '\0';
     store_save();
@@ -397,14 +496,18 @@ static bool confirm_disconnect() {
 // Three short pages. Returns true when the person disconnected the account.
 static bool flow_settings() {
   static const char *SCENES[4] = {"Auto", "Dark", "Night", "Color"};
-  static const char *PAGES[3] = {"Display", "Night", "System"};
+  static const char *PAGES[4] = {"Display", "Night", "System", "People"};
   int page = 0;
   hw_backlight(prefs.bright);
   hw_touch_flush();
-  enum { R_BRIGHT, R_SCENE, R_GRAPH, R_ROTATE, R_NSTART, R_NEND, R_NDIM, R_UPDATE, R_ZONE, R_OFFSET, R_SOUND, R_WIFI, R_DISCONNECT };
+  enum { R_BRIGHT, R_SCENE, R_GRAPH, R_ROTATE, R_NSTART, R_NEND, R_NDIM, R_UPDATE, R_ZONE, R_OFFSET, R_SOUND, R_WIFI, R_DISCONNECT, R_PERSON };
   for (;;) {
-    ui::Row rows[5];
-    int ids[5];   // which setting each row on the screen is
+    // the People page exists while the account follows someone
+    const int npages = snap.nfollowed > 0 ? 4 : 3;
+    if (page >= npages) page = 0;
+    ui::Row rows[6];
+    int ids[6];               // which setting each row on the screen is
+    const char *who[6] = {};  // the People page: the id behind each row
     int n = 0;
     char offset[12];
     const int tz = prefs.tzMin < 0 ? -prefs.tzMin : prefs.tzMin;
@@ -436,6 +539,27 @@ static bool flow_settings() {
       ids[n] = R_NDIM;
       rows[n] = {"Night dim", "", ui::ROW_STEPPER};
       snprintf(rows[n++].value, sizeof(rows[0].value), "%d%%", prefs.nightBright);
+    } else if (page == 3) {
+      // whose glucose the screen shows: the account's own and the people it
+      // follows, up to four at once; nothing chosen yet reads as the default
+      if (!prefs.people[0]) {
+        const char *chosen[SS_MAX_TILES];
+        const int c = chosen_ids(chosen);
+        for (int i = 0; i < c; i++) ss::selectionToggle(prefs.people, sizeof(prefs.people), chosen[i]);
+      }
+      const int maxRows = ui::menuLayout().maxRows;
+      if (own_has_source()) {
+        ids[n] = R_PERSON;
+        who[n] = ME;
+        rows[n] = {"Me", "", ui::ROW_CYCLE};
+        snprintf(rows[n++].value, sizeof(rows[0].value), "%s", ss::selectionHas(prefs.people, ME) ? "On" : "Off");
+      }
+      for (int i = 0; i < snap.nfollowed && n < maxRows; i++) {
+        ids[n] = R_PERSON;
+        who[n] = snap.followed[i].id;
+        rows[n] = {snap.followed[i].label, "", ui::ROW_CYCLE};
+        snprintf(rows[n++].value, sizeof(rows[0].value), "%s", ss::selectionHas(prefs.people, snap.followed[i].id) ? "On" : "Off");
+      }
     } else {
       // A newer firmware leads the page while there is one.
       if (update_available()) {
@@ -466,7 +590,7 @@ static bool flow_settings() {
       }
     }
     const uint32_t t0 = millis();
-    ui::drawMenu(PAGES[page], page == 2 ? "v" FW_VERSION : nullptr, rows, n, "Done", PAGES[(page + 1) % 3]);
+    ui::drawMenu(PAGES[page], page == 2 ? "v" FW_VERSION : (page == 3 ? "Up to 4 at once" : nullptr), rows, n, "Done", PAGES[(page + 1) % npages]);
     const uint32_t t1 = millis();
     hw_present();
     last_draw_ms = t1 - t0;
@@ -483,7 +607,7 @@ static bool flow_settings() {
       return false;
     }
     if (L.right().has(tap_x, tap_y)) {
-      page = (page + 1) % 3;
+      page = (page + 1) % npages;
       hw_backlight(prefs.bright);
       continue;
     }
@@ -530,6 +654,14 @@ static bool flow_settings() {
         break;
       case R_OFFSET: prefs.tzMin = (int16_t)constrain(prefs.tzMin + dir * 30, -720, 840); break;
       case R_SOUND: prefs.sound = !prefs.sound; break;
+      case R_PERSON:
+        // the last chosen person stays, a fifth is refused (the rule in ss_logic.h)
+        if (who[row] && ss::selectionToggle(prefs.people, sizeof(prefs.people), who[row])) {
+          rebuild_tiles();
+          net_ask_for(true);   // the newly chosen person's reading is on its way before Settings closes
+          dirty = true;
+        }
+        break;
       case R_WIFI:
         store_save();
         flow_wifi(false);
@@ -655,6 +787,8 @@ static uint32_t home_signature() {
   ss::localHourMinute(now, prefs.tzMin, &h, &m);
   uint32_t sig = (uint32_t)(h * 60 + m);
   sig = sig * 31 + (uint32_t)ss::elapsedMinutes(now, snap.dateMs);
+  for (int i = 0; i < ntiles; i++) sig = sig * 31 + (uint32_t)ss::elapsedMinutes(now, tiles[i].snap->dateMs) + (ss::isStale(now, tiles[i].snap->dateMs) ? 7 : 0);
+  sig = sig * 31 + (uint32_t)ntiles;
   sig = sig * 31 + (net_wifi_up() ? 1 : 0) + (api_ok ? 2 : 0) + (clock_synced() ? 4 : 0) + (ss::isStale(now, snap.dateMs) ? 8 : 0) +
         (ss::isLongStale(now, snap.dateMs) ? 16 : 0) + (uint32_t)current_look() * 32;
   sig = sig * 31 + snap_seq;
@@ -665,7 +799,24 @@ static void render_home() {
   const uint32_t t0 = millis();
   const int look = current_look();
   ui::updateHint = update_available() && look != ui::LOOK_NIGHT;   // a quiet dot by day, nothing at night
-  ui::drawHome(make_view(), look);
+  ui::View v = make_view();
+  if (ntiles > 1) {
+    ui::drawSplit(v, look, tiles, ntiles);   // several people at once
+  } else if (ntiles == 1 && !tiles[0].self) {
+    // one followed person alone: the whole scene with their name, or the
+    // tile that says why there is no number
+    const ui::TileSource &t = tiles[0];
+    if (t.snap->state == ss::STATE_OK && !t.notShared && !t.paused) {
+      v.snap = t.snap;
+      v.personLabel = t.label;
+      v.graphHours = t.snap->hours ? t.snap->hours : v.graphHours;
+      ui::drawHome(v, look);
+    } else {
+      ui::drawSplit(v, look, tiles, 1);
+    }
+  } else {
+    ui::drawHome(v, look);
+  }
   ui::updateHint = false;
   const uint32_t t1 = millis();
   hw_present();

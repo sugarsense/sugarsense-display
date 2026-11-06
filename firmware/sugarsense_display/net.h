@@ -9,10 +9,15 @@
 //                                                    the pairing page
 //   POST /displayPairPoll  {pollSecret, deviceId} -> pending, then ONE session
 //                                                    token (displayToken)
-//   POST /getDisplaySnapshot {hours}              -> the latest reading, the
+//   POST /getDisplaySnapshot {hours, people?}     -> the latest reading, the
 //        Authorization: Bearer <displayToken>        account's limits and unit,
 //                                                    the trend points and the
-//                                                    clock offset
+//                                                    clock offset; `followed`
+//                                                    (everyone the account
+//                                                    follows) and `people`
+//                                                    (the followed ones asked
+//                                                    for, each with their own
+//                                                    reading) since 0.4.0
 //   POST /displayUnpair {}                        -> ends the session
 //        Authorization: Bearer <displayToken>        ("Disconnect")
 // A device with no keyboard shows a code; the person confirms it on a page
@@ -179,13 +184,59 @@ static int api_unpair(const char *token) {
 }
 
 // ---- the snapshot ------------------------------------------------------------------
+// One reading as the server sends it (the account's own at the top level, a
+// followed person's inside `people`): the value, its moment, the arrow, the
+// unit, the four limits and the points of the window.
+static void read_reading(JsonObject r, int hours, bool *hasValue, double *mgdl, int64_t *dateMs, int *arrow, bool *isMmol, ss::Band *band, ss::Point *pts, int *npts, int *outHours) {
+  *hasValue = !r["value"].isNull() && (r["date"] | (int64_t)0) > 0;
+  *mgdl = r["value"] | 0.0;
+  *dateMs = r["date"] | (int64_t)0;
+  *arrow = r["arrowDirection"] | 3;
+  *isMmol = r["isMmol"] | false;
+  *outHours = r["hours"] | hours;
+  band->veryLow = r["veryLowLimit"] | ss::DEFAULT_BAND.veryLow;
+  band->low = r["lowLimit"] | ss::DEFAULT_BAND.low;
+  band->high = r["highLimit"] | ss::DEFAULT_BAND.high;
+  band->veryHigh = r["veryHighLimit"] | ss::DEFAULT_BAND.veryHigh;
+  *npts = 0;
+  JsonArray arr = r["points"].as<JsonArray>();
+  int skip = (int)arr.size() - SS_MAX_POINTS;   // keep the newest when there are too many
+  for (JsonArray p : arr) {
+    if (skip-- > 0) continue;
+    if (p.size() < 2 || *npts >= SS_MAX_POINTS) continue;
+    pts[*npts].dateMs = p[0] | (int64_t)0;
+    pts[*npts].mgdl = p[1] | 0.0;
+    (*npts)++;
+  }
+}
+
 // 200 fills `out` (its `state` says what the account can show); 401 = the
-// session is gone, pair again.
-static int api_snapshot(const char *token, int hours, ui::Snapshot &out) {
+// session is gone, pair again. `people` names the followed people the screen
+// shows (their ids, comma-separated, at most four); `peoplePoints` asks for
+// the whole window of the one person shown alone, else each person comes
+// with the two newest readings only (enough for the change).
+static int api_snapshot(const char *token, int hours, const char *people, bool peoplePoints, ui::Snapshot &out) {
   JsonDocument body;
   body["hours"] = hours;
   body["model"] = SS_MODEL;
   body["appVersion"] = FW_VERSION;
+  if (people && people[0]) {
+    JsonArray ids = body["people"].to<JsonArray>();
+    const char *p = people;
+    while (*p) {
+      const char *e = strchr(p, ',');
+      const size_t len = e ? (size_t)(e - p) : strlen(p);
+      char id[48];
+      if (len > 0 && len < sizeof(id)) {
+        memcpy(id, p, len);
+        id[len] = '\0';
+        ids.add(id);
+      }
+      if (!e) break;
+      p = e + 1;
+    }
+    if (peoplePoints) body["peoplePoints"] = true;
+  }
   String payload;
   serializeJson(body, payload);
   JsonDocument doc;
@@ -193,7 +244,8 @@ static int api_snapshot(const char *token, int hours, ui::Snapshot &out) {
   if (status != 200) return status;
   JsonObject r = doc["response"];
   if (r.isNull() || r["state"].isNull()) return -103;
-  ui::Snapshot s;
+  static ui::Snapshot s;   // the net task's own (too large for its stack)
+  s = ui::Snapshot();
   s.state = r["state"] | (int)ss::STATE_NONE;
   // on every answer, whatever the state: the clock offset and the cadence
   s.hasOffset = r["utcOffsetMinutes"].is<int>();
@@ -207,25 +259,32 @@ static int api_snapshot(const char *token, int hours, ui::Snapshot &out) {
   const char *app = r["appUrl"] | "";
   snprintf(s.appUrl, sizeof(s.appUrl), "%s", strncmp(app, "https://", 8) == 0 && strlen(app) < sizeof(s.appUrl) ? app : SS_APP_URL);
   if (s.state == ss::STATE_OK) {
-    s.hasValue = !r["value"].isNull() && (r["date"] | (int64_t)0) > 0;
-    s.mgdl = r["value"] | 0.0;
-    s.dateMs = r["date"] | (int64_t)0;
-    s.arrow = r["arrowDirection"] | 3;
-    s.isMmol = r["isMmol"] | false;
-    s.hours = r["hours"] | hours;
-    s.band.veryLow = r["veryLowLimit"] | ss::DEFAULT_BAND.veryLow;
-    s.band.low = r["lowLimit"] | ss::DEFAULT_BAND.low;
-    s.band.high = r["highLimit"] | ss::DEFAULT_BAND.high;
-    s.band.veryHigh = r["veryHighLimit"] | ss::DEFAULT_BAND.veryHigh;
-    JsonArray pts = r["points"].as<JsonArray>();
-    int skip = (int)pts.size() - SS_MAX_POINTS;   // keep the newest when there are too many
-    for (JsonArray p : pts) {
-      if (skip-- > 0) continue;
-      if (p.size() < 2 || s.npts >= SS_MAX_POINTS) continue;
-      s.pts[s.npts].dateMs = p[0] | (int64_t)0;
-      s.pts[s.npts].mgdl = p[1] | 0.0;
-      s.npts++;
+    read_reading(r, hours, &s.hasValue, &s.mgdl, &s.dateMs, &s.arrow, &s.isMmol, &s.band, s.pts, &s.npts, &s.hours);
+  }
+  // everyone this account follows (the People page), then the ones asked for
+  for (JsonObject f : r["followed"].as<JsonArray>()) {
+    if (s.nfollowed >= SS_MAX_FOLLOWED) break;
+    const char *id = f["id"] | "";
+    const char *label = f["label"] | "";
+    if (!id[0] || strlen(id) >= sizeof(s.followed[0].id)) continue;
+    snprintf(s.followed[s.nfollowed].id, sizeof(s.followed[0].id), "%s", id);
+    ui::asciiLabel(label, s.followed[s.nfollowed].label, sizeof(s.followed[0].label));
+    s.nfollowed++;
+  }
+  for (JsonObject p : r["people"].as<JsonArray>()) {
+    if (s.npeople >= SS_MAX_TILES) break;
+    const char *id = p["id"] | "";
+    const char *label = p["label"] | "";
+    if (!id[0] || strlen(id) >= sizeof(s.people[0].id)) continue;
+    ui::Person &q = s.people[s.npeople];
+    snprintf(q.id, sizeof(q.id), "%s", id);
+    ui::asciiLabel(label, q.label, sizeof(q.label));
+    q.state = p["state"] | (int)ss::STATE_FOLLOWER;
+    q.paused = !p["sharingPaused"].isNull();
+    if (q.state == ss::STATE_OK) {
+      read_reading(p, hours, &q.hasValue, &q.mgdl, &q.dateMs, &q.arrow, &q.isMmol, &q.band, q.pts, &q.npts, &q.hours);
     }
+    s.npeople++;
   }
   out = s;
   return 200;
