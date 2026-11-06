@@ -234,6 +234,25 @@ static int runLogic() {
           CHECK(gx::textW(ui::tileWordFont(word, t[i].w), word) <= t[i].w - 28);
     }
   }
+  // Settings' tabs: every page name fits its tab in both orientations, three
+  // or four tabs; a tab's touch never reaches a row; the notes keep clear of Done
+  for (int r = 0; r < 2; r++) {
+    gx::setRotation(r);
+    static const char *const TABS[4] = {"Display", "Night", "System", "People"};
+    const ui::MenuLayout TL = ui::menuLayout();
+    for (int nt = 3; nt <= 4; nt++) {
+      const AAFont &tf = ui::tabFont(TABS, nt);
+      for (int i = 0; i < nt; i++) {
+        CHECK(gx::textW(tf, TABS[i]) <= TL.tab(i, nt).w - 14);
+        CHECK(TL.tabHit(i, nt).y + TL.tabHit(i, nt).h <= TL.top);
+        if (i) CHECK(TL.tab(i, nt).x == TL.tab(i - 1, nt).x + TL.tab(i - 1, nt).w);
+      }
+      CHECK(TL.tab(nt - 1, nt).x + TL.tab(nt - 1, nt).w == gx::W - 10);
+    }
+    CHECK(16 + gx::textW(F_SMALL, "Version 0.4.33") <= TL.right().x - 8);
+    CHECK(16 + gx::textW(F_SMALL, "Up to 4 at once") <= TL.right().x - 8);
+  }
+  gx::setRotation(0);
   // whose glucose the screen shows: a list of ids, at most four, never empty once chosen
   {
     char sel[64] = "";
@@ -428,22 +447,25 @@ static int runRender(const std::string &dir) {
     v.snap = &s;
 
     ui::Row disp[5] = {{"Brightness", "100%", ui::ROW_STEPPER}, {"Scene", "Auto", ui::ROW_CYCLE}, {"Graph", "3 hours", ui::ROW_CYCLE}, {"Rotate screen", "", ui::ROW_ACTION}, {"Sound", "On", ui::ROW_CYCLE}};
-    SHOT("18_settings_display", ui::drawMenu("Display", nullptr, disp, 5, "Done", "Night"));
+    // Settings: the pages as tabs on top (three, four while the account follows someone)
+    static const char *const TABS[4] = {"Display", "Night", "System", "People"};
+    SHOT("18_settings_display", ui::drawSettings(TABS, 3, 0, nullptr, disp, 5));
+    SHOT("18b_settings_display_four", ui::drawSettings(TABS, 4, 0, nullptr, disp, 5));
     ui::Row night[3] = {{"Night starts", "23:00", ui::ROW_STEPPER}, {"Night ends", "07:00", ui::ROW_STEPPER}, {"Night dim", "10%", ui::ROW_STEPPER}};
-    SHOT("25_settings_night", ui::drawMenu("Night", nullptr, night, 3, "Done", "System"));
+    SHOT("25_settings_night", ui::drawSettings(TABS, 3, 1, nullptr, night, 3));
     // the fullest System page: an update, a manual time zone, a paired account
     ui::Row sys[5] = {{"Update", "0.3.3 available", ui::ROW_ACTION},
                       {"Time zone", "Manual", ui::ROW_CYCLE},
                       {"UTC offset", "+5:30", ui::ROW_STEPPER},
                       {"Wi-Fi", "Guest_Network_With_A_Long_Name", ui::ROW_ACTION},
                       {"Disconnect", "", ui::ROW_ACTION}};
-    SHOT("19_settings_system", ui::drawMenu("System", "v0.3.3", sys, 5, "Done", "Display"));
+    SHOT("19_settings_system", ui::drawSettings(TABS, 4, 2, "Version 0.4.3", sys, 5));
     // the longest value a settings row carries fits beside its label, upright too
     CHECK(gx::textW(F_MED, "Time zone") + 12 + gx::textW(F_MED, "Auto (+14:00)") <= gx::W - 20 - 32);
     ui::Row sysAuto[3] = {{"Time zone", "Auto (+4:00)", ui::ROW_CYCLE},
                           {"Wi-Fi", "Home 5G", ui::ROW_ACTION},
                           {"Disconnect", "", ui::ROW_ACTION}};
-    SHOT("26_settings_system_auto", ui::drawMenu("System", "v0.3.3", sysAuto, 3, "Done", "Display"));
+    SHOT("26_settings_system_auto", ui::drawSettings(TABS, 3, 2, "Version 0.4.3", sysAuto, 3));
     SHOT("27_update", ui::drawUpdate("0.3.3", "app.sugarsense.io/install"));
     // a newer firmware exists: the quiet dot beside the three
     series(s, 3, 2, 104, 26, false);
@@ -483,7 +505,8 @@ static int runRender(const std::string &dir) {
       SHOT("51_follow_color", ui::drawHome(one, ui::LOOK_COLOR));
       SHOT("52_follow_night", ui::drawHome(one, ui::LOOK_NIGHT));
       ui::Row people[5] = {{"Me", "On", ui::ROW_CYCLE}, {"Anna (daughter)", "On", ui::ROW_CYCLE}, {"Tom", "Off", ui::ROW_CYCLE}, {"Grandpa Joe", "Off", ui::ROW_CYCLE}, {"Sam", "On", ui::ROW_CYCLE}};
-      SHOT("53_settings_people", ui::drawMenu("People", nullptr, people, 5, "Done", "Display"));
+      static const char *const TABS4[4] = {"Display", "Night", "System", "People"};
+      SHOT("53_settings_people", ui::drawSettings(TABS4, 4, 3, "Up to 4 at once", people, 5));
     }
   }
   return 0;

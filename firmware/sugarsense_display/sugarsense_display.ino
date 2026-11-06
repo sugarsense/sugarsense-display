@@ -16,7 +16,7 @@
 // Files: ss_logic.h (the display rules), gx.h (the renderer), ui.h (every
 // screen), hw.h (the board), store.h (settings), net.h (Wi-Fi + the API).
 
-#define FW_VERSION "0.4.2"
+#define FW_VERSION "0.4.3"
 
 #include "ui.h"
 #include "hw.h"
@@ -495,7 +495,8 @@ static bool confirm_disconnect() {
   }
 }
 
-// Three short pages. Returns true when the person disconnected the account.
+// Three or four short pages, named as tabs on top. Returns true when the
+// person disconnected the account.
 static bool flow_settings() {
   static const char *SCENES[4] = {"Auto", "Dark", "Night", "Color"};
   static const char *PAGES[4] = {"Display", "Night", "System", "People"};
@@ -592,7 +593,7 @@ static bool flow_settings() {
       }
     }
     const uint32_t t0 = millis();
-    ui::drawMenu(PAGES[page], page == 2 ? "v" FW_VERSION : (page == 3 ? "Up to 4 at once" : nullptr), rows, n, "Done", PAGES[(page + 1) % npages]);
+    ui::drawSettings(PAGES, npages, page, page == 2 ? "Version " FW_VERSION : (page == 3 ? "Up to 4 at once" : nullptr), rows, n);
     const uint32_t t1 = millis();
     hw_present();
     last_draw_ms = t1 - t0;
@@ -602,14 +603,17 @@ static bool flow_settings() {
     trace(TR_TAP, tap_x, tap_y);
     tick();
     ui::MenuLayout L = ui::menuLayout();
-    if (L.left().has(tap_x, tap_y)) {
+    if (L.right().has(tap_x, tap_y)) {   // Done
       const uint32_t s0 = millis();
       store_save();
       trace(TR_SAVE, (int)(millis() - s0), 0);
       return false;
     }
-    if (L.right().has(tap_x, tap_y)) {
-      page = (page + 1) % npages;
+    int tabbed = -1;
+    for (int i = 0; i < npages; i++)
+      if (L.tabHit(i, npages).has(tap_x, tap_y)) tabbed = i;
+    if (tabbed >= 0) {
+      page = tabbed;
       hw_backlight(prefs.bright);
       continue;
     }

@@ -1102,6 +1102,16 @@ struct MenuLayout {
   }
   Rect left() const { return {10, H - 56, (W - 30) / 2, 46}; }
   Rect right() const { return {20 + (W - 30) / 2, H - 56, (W - 30) / 2, 46}; }
+  // Settings: the page names as tabs in the title's place, side by side
+  Rect tab(int i, int n) const {
+    const int x0 = 10, w = W - 20, tw = w / n;
+    return {x0 + i * tw, 8, i == n - 1 ? w - i * tw : tw, top - 16};
+  }
+  // a tab answers a touch up to the screen's edge and down to the first row
+  Rect tabHit(int i, int n) const {
+    Rect r = tab(i, n);
+    return {r.x, 0, r.w, top - 4};
+  }
 };
 
 static MenuLayout menuLayout() {
@@ -1128,8 +1138,7 @@ struct Row {
   int kind;
 };
 
-static void drawMenu(const char *title, const char *sub, const Row *rows, int n, const char *leftLabel, const char *rightLabel) {
-  drawHeader(title, sub);
+static void drawRows(const Row *rows, int n) {
   MenuLayout L = menuLayout();
   for (int i = 0; i < n && i < L.maxRows; i++) {
     Rect r = L.row(i);
@@ -1158,8 +1167,45 @@ static void drawMenu(const char *title, const char *sub, const Row *rows, int n,
       }
     }
   }
+}
+
+static void drawMenu(const char *title, const char *sub, const Row *rows, int n, const char *leftLabel, const char *rightLabel) {
+  drawHeader(title, sub);
+  drawRows(rows, n);
+  MenuLayout L = menuLayout();
   if (leftLabel) drawButton(L.left(), leftLabel, false);
   if (rightLabel) drawButton(L.right(), rightLabel, false);
+}
+
+// The tabs' font: the medium one when every page name fits its tab, else the
+// small one (four tabs on the upright screen).
+static const AAFont &tabFont(const char *const *tabs, int n) {
+  MenuLayout L = menuLayout();
+  for (int i = 0; i < n; i++)
+    if (gx::textW(F_MED, tabs[i]) > L.tab(i, n).w - 14) return F_SMALL;
+  return F_MED;
+}
+
+// Settings: every page named as a tab on top, the current one filled in the
+// brand green, so the pages show they are pages and any is one tap away; the
+// rows; Done bottom right on every page; a quiet note bottom left (the
+// version, a page's hint). (2026-11-06, the owner: nothing said the old
+// "next page" button switched the page.)
+static void drawSettings(const char *const *tabs, int nt, int cur, const char *note, const Row *rows, int n) {
+  gx::clear(C_BG);
+  MenuLayout L = menuLayout();
+  const int th = L.top - 16;
+  gx::rrect(10, 8, W - 20, th, th / 2, C_CARD);
+  const AAFont &f = tabFont(tabs, nt);
+  const int lift = &f == &F_MED ? 8 : 6;
+  for (int i = 0; i < nt; i++) {
+    Rect r = L.tab(i, nt);
+    if (i == cur) gx::rrect(r.x + 3, r.y + 3, r.w - 6, r.h - 6, (r.h - 6) / 2, C_BRAND);
+    gx::textC(f, r.x + r.w / 2, r.y + r.h / 2 + lift, tabs[i], i == cur ? C_ON_BRAND : C_DIM);
+  }
+  drawRows(rows, n);
+  drawButton(L.right(), "Done", false);
+  if (note) gx::text(F_SMALL, 16, L.right().y + L.right().h / 2 + 6, note, C_DIM);
 }
 
 static void drawWifiList(const char *const *ssids, const int *rssi, int n, const char *sub, const char *leftLabel) {

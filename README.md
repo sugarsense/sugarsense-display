@@ -65,9 +65,12 @@ time servers `pool.ntp.org` and `time.google.com` for the clock; nothing else.
 
 ## Using it
 
-- **The three dots** (top right) open Settings, three short pages:
+- **The three dots** (top right) open Settings, short pages named as tabs
+  along the top (tap any; a fourth, People, while the account follows someone):
   - **Display:** brightness, the scene, the graph's window (3, 6, 12 or 24
-    hours, or Off), screen rotation, sound.
+    hours, or Off), screen rotation, sound (with the small speaker plugged into
+    the board's speaker socket: a soft tick on a tap, a chime when Wi-Fi joins
+    and when the display is paired).
   - **Night:** when the night starts and ends, and how dim the screen gets.
   - **System:** the time zone (Auto, or Manual with an offset you set), Wi-Fi,
     disconnect, and an Update row when a newer version is out.

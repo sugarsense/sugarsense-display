@@ -194,9 +194,12 @@ static const int SOUND_RATE = 16000;
 static I2SClass hw_i2s;
 static bool hw_sound_ready = false;
 
+// The board's amplifier plays one channel of the stream (which one is set by
+// a pin we do not see), so every sample goes out on BOTH channels: the sound
+// comes through whichever it reads, at full level either way.
 static void hw_sound_begin() {
   hw_i2s.setPins(42, 2, 41);
-  hw_sound_ready = hw_i2s.begin(I2S_MODE_STD, SOUND_RATE, I2S_DATA_BIT_WIDTH_16BIT, I2S_SLOT_MODE_MONO);
+  hw_sound_ready = hw_i2s.begin(I2S_MODE_STD, SOUND_RATE, I2S_DATA_BIT_WIDTH_16BIT, I2S_SLOT_MODE_STEREO);
 }
 
 // `level` 0..100.
@@ -205,16 +208,18 @@ static void hw_note(int hertz, int milliseconds, int level) {
   const int total = SOUND_RATE * milliseconds / 1000;
   const int fade = min(total / 3, SOUND_RATE / 200);
   const float step = 6.2831853f * hertz / SOUND_RATE, peak = 280.0f * level;
-  int16_t block[160];
+  int16_t block[2 * 160];   // left, right, left, right ...
   float phase = 0.0f;
   for (int done = 0; done < total;) {
-    int n = min((int)(sizeof(block) / sizeof(block[0])), total - done);
+    int n = min(160, total - done);
     for (int i = 0; i < n; i++, done++) {
       float gain = done < fade ? (float)done / fade : (total - done < fade ? (float)(total - done) / fade : 1.0f);
-      block[i] = (int16_t)(sinf(phase) * peak * gain);
+      const int16_t v = (int16_t)(sinf(phase) * peak * gain);
+      block[2 * i] = v;
+      block[2 * i + 1] = v;
       phase += step;
     }
-    hw_i2s.write((const uint8_t *)block, n * sizeof(block[0]));
+    hw_i2s.write((const uint8_t *)block, 2 * n * sizeof(block[0]));
   }
 }
 
